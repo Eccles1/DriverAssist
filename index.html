@@ -2,7 +2,7 @@
 
 <html>
 <head>
-  <title>Driving Simulator with Full AI</title>
+  <title>Driving Simulator with AI</title>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
   <link href="common.css" rel="stylesheet" type="text/css" />
 </head> 
@@ -50,9 +50,8 @@
 
   <div id='instructions'>
     <p>Use the <b>arrow keys</b> to drive the car. Click anywhere on the simulation screen to begin.</p>
-    <p>The SmartDriving AI has been implemented to help you control your speed and keep within the centre lane.</p>
-    <p>You may regain control of your car at any point in time by pressing the arrow keys to steer.</p>
-    <p>In the event that you take manual control of your car, there may be a time lag before the AI kicks into place again.</p>
+    <p>The DriverAssist AI has been implemented to help you maintain your speed and also keep within the lane.</p>
+    <p>You only need to accelerate, brake and avoid the cars around.</p>
   </div>
 
   <div id="racer">
@@ -132,134 +131,91 @@
     // UPDATE THE GAME WORLD
     //=========================================================================
 
-    function update(dt) {
-    var n, car, carW, sprite, spriteW;
+   /// Start of AI Driver Assist feature
+function driverAssistAI(dt) {
     var playerSegment = findSegment(position + playerZ);
     var playerW = SPRITES.PLAYER_STRAIGHT.w * SPRITES.SCALE;
-    var speedPercent = speed / maxSpeed;
-    var dx = dt * 2 * speedPercent; // at top speed, should be able to cross from left to right (-1 to 1) in 1 second
-    var startPosition = position;
+    var dx = dt * 2 * (speed / maxSpeed);
+    var safeDistance = 300;
 
-    updateCars(dt, playerSegment, playerW);
-
-    // Check for cars ahead in the same lane
+    var carAhead = null;
     for (let car of playerSegment.cars) {
         let carW = car.sprite.w * SPRITES.SCALE;
-        let distanceToCar = car.z - position;
-
-        // Ensure we only check cars directly ahead in the same lane
-        if (Math.abs(playerX - car.offset) < 1 && distanceToCar > 0 && distanceToCar < 100) {
-            console.log("Car detected ahead in the same lane. Distance: " + distanceToCar);
-
-            // Reduce speed based on distance to the car ahead
-            if (distanceToCar < 80) {
-                console.log("Car is close. Slowing down further.");
-                speed = Math.max(speed * 0.8, 10); // Reduce speed to 80% of current speed
-            } else if (distanceToCar < 30) {
-                console.log("Car is very close. Applying strong braking.");
-                speed = Math.max(speed * 0.5, 5); // Reduce speed to 50% of current speed
-            } else {
-                speed = Util.accelerate(speed, breaking, dt); // Normal braking
-            }
-
-            break; // Stop checking after detecting one car directly ahead
+        if (Util.overlap(playerX, playerW, car.offset, carW, 0.8) && car.z - position < safeDistance) {
+            carAhead = car;
+            break;
         }
     }
 
-    // Follow the Lane Logic
-    var targetLane = 1; // Target lane (0 is the center lane)
-    var laneWidth = 2 / lanes; // Width of each lane (assuming lanes are evenly spaced)
-
-    // Press keys to shift lanes
-    if (keyLeft && targetLane > 0) {
-        targetLane -= 1;
-    } else if (keyRight && targetLane < lanes - 1) {
-        targetLane += 1;
-    }
-
-    // Calculate the target position for the center of the lane
-    var targetX = (targetLane - (lanes - 1) / 2) * laneWidth;
-
-    // Smoothly move the car towards the center of the lane
-    var dx = dt * 2 * (speed / maxSpeed); // Adjust the speed of lane correction
-    if (playerX < targetX) {
-        playerX = Math.min(playerX + dx, targetX); // Move right
-    } else if (playerX > targetX) {
-        playerX = Math.max(playerX - dx, targetX); // Move left
-    }
-
-    position = Util.increase(position, dt * speed, trackLength);
-
-    // Auto increase speed
-    if (!keyLeft && !keyRight && !keyFaster && !keySlower && speedPercent < 80) {
-        speed = Util.accelerate(speed, accel / 3, dt); // Disable acceleration when player input detected
-    } else if (keyFaster) {
-        speed = Util.accelerate(speed, accel, dt);
-    } else if (keySlower) {
-        speed = Util.accelerate(speed, breaking, dt);
-    } else {
-        speed = Util.accelerate(speed, 0, dt); // Default acceleration (no change)
-    }
-
-    if ((playerX < -1) || (playerX > 1)) {
-        if (speed > offRoadLimit)
-            speed = Util.accelerate(speed, offRoadDecel, dt);
-
-        for (n = 0; n < playerSegment.sprites.length; n++) {
-            sprite = playerSegment.sprites[n];
-            spriteW = sprite.source.w * SPRITES.SCALE;
-            if (Util.overlap(playerX, playerW, sprite.offset + spriteW / 2 * (sprite.offset > 0 ? 1 : -1), spriteW)) {
-                speed = maxSpeed / 5;
-                position = Util.increase(playerSegment.p1.world.z, -playerZ, trackLength); // Stop in front of sprite (at front of segment)
-                break;
+    function isLaneClear(offset) {
+        for (let car of findSegment(position + playerZ).cars) {
+            if (Math.abs(car.offset - offset) < 0.2) {
+                return false;
             }
         }
+        return true;
     }
 
-    for (n = 0; n < playerSegment.cars.length; n++) {
-        car = playerSegment.cars[n];
-        carW = car.sprite.w * SPRITES.SCALE;
-        if (speed > car.speed) {
-            if (Util.overlap(playerX, playerW, car.offset, carW, 0.8)) {
-                speed = car.speed * (car.speed / speed);
-                position = Util.increase(car.z, -1.2 * playerZ, trackLength);
-                break;
-            }
-        }
-    }
-    
-    // Look ahead up to 5 segments
-let lookahead = 5;  // Number of segments to look ahead
-
-for (let i = 1; i <= lookahead; i++) {
-    let segment = segments[(playerSegment.index + i) % segments.length];
-
-    // Check for cars in the same lane as the player
-    for (let car of segment.cars) {
-        let carW = car.sprite.w * SPRITES.SCALE;
-
-        // If the car is ahead and the player is faster than the car
-        if (Math.abs(playerX - car.offset) < 1 && car.speed < speed) {
-            // Check for overlap and slow down the player
-            if (Util.overlap(playerX, playerW, car.offset, carW, 1.2)) {
-                // Apply braking to the player if there is a slower car ahead
-                console.log("Slower car ahead. Slowing down...");
-                speed = Util.accelerate(speed, breaking, dt);  // Apply deceleration
-
-                // Apply stronger braking if the player is too close
-                if (Util.overlap(playerX, playerW, car.offset, carW, 0.5)) {
-                    console.log("Very close to the slower car. Stronger braking.");
-                    speed = Math.max(speed * 0.5, 5);  // Apply stronger braking
-                }
-
-                break;  // Stop checking further once the player is slowing down
-            }
+    if (carAhead) {
+        if (carAhead.z - position < safeDistance / 2) {
+            speed = Util.accelerate(speed, breaking / 2, dt); // Assist in slowing down
         }
     }
 }
 
+    function update(dt) {
+      driverAssistAI(dt);
+      var n, car, carW, sprite, spriteW;
+      var playerSegment = findSegment(position+playerZ);
+      var playerW       = SPRITES.PLAYER_STRAIGHT.w * SPRITES.SCALE;
+      var speedPercent  = speed/maxSpeed;
+      var dx            = dt * 2 * speedPercent; // at top speed, should be able to cross from left to right (-1 to 1) in 1 second
+      var startPosition = position;
 
-      //=======================================================================================
+      updateCars(dt, playerSegment, playerW);
+      position = Util.increase(position, dt * speed, trackLength);
+
+      if (keyLeft)
+        playerX = playerX - dx;
+      else if (keyRight)
+        playerX = playerX + dx;
+
+      if (keyFaster)
+        speed = Util.accelerate(speed, accel, dt);
+      else if (keySlower)
+        speed = Util.accelerate(speed, breaking, dt);
+      else
+        speed = Util.accelerate(speed, 0, dt);
+
+
+      if ((playerX < -1) || (playerX > 1)) {
+
+        if (speed > offRoadLimit)
+          speed = Util.accelerate(speed, offRoadDecel, dt);
+
+        for(n = 0 ; n < playerSegment.sprites.length ; n++) {
+          sprite  = playerSegment.sprites[n];
+          spriteW = sprite.source.w * SPRITES.SCALE;
+          if (Util.overlap(playerX, playerW, sprite.offset + spriteW/2 * (sprite.offset > 0 ? 1 : -1), spriteW)) {
+            speed = maxSpeed/5;
+            position = Util.increase(playerSegment.p1.world.z, -playerZ, trackLength); // stop in front of sprite (at front of segment)
+            break;
+          }
+        }
+      }
+
+      for(n = 0 ; n < playerSegment.cars.length ; n++) {
+        car  = playerSegment.cars[n];
+        carW = car.sprite.w * SPRITES.SCALE;
+        if (speed > car.speed) {
+          if (Util.overlap(playerX, playerW, car.offset, carW, 0.8)) {
+            speed    = car.speed * (car.speed/speed);
+            position = Util.increase(car.z, -playerZ, trackLength);
+            break;
+          }
+        }
+      }
+      //AI makes adjustments after collision
       playerX = Util.limit(playerX, -1, 1);     // dont ever let it go too far out of bounds
       speed   = Util.limit(speed, 0, maxSpeed); // or exceed maxSpeed
 
@@ -742,7 +698,7 @@ for (let car of playerSegment.cars) {
     
     playerX = Util.limit(playerX, -1, 1);
     speed = Util.limit(speed, 0, maxSpeed);
-    ('speed', Math.round(updateHudspeed/100));
+    updateHud('speed', Math.round(speed/100));
 
 }
 //AI function End
